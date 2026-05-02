@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ 
 <title>Farmacia · Productos Naturales</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -654,6 +656,8 @@
     </div>
   </div>
   <div class="header-actions">
+    <button class="btn btn-outline" onclick="triggerExcelImport()">📥 Importar Excel</button>
+<input type="file" id="excelFileInput" accept=".xlsx,.xls" style="display:none" onchange="handleExcelFile(event)">
     <button class="btn btn-outline" onclick="switchTab('estadisticas')">📊 Estadísticas</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ Añadir producto</button>
   </div>
@@ -1236,6 +1240,154 @@ function switchTab(name) {
   });
   if (name === 'todos') renderAll();
   if (name === 'estadisticas') renderStats();
+}
+</script>
+  <div class="modal-overlay" id="importModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <div class="modal-title">📥 Importar desde Excel</div>
+      <button class="modal-close" onclick="closeModal('importModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="importPreview" style="display:none">
+        <div style="background:rgba(122,182,72,0.1);border:1.5px solid rgba(122,182,72,0.3);border-radius:12px;padding:1rem;margin-bottom:1.25rem">
+          <div style="font-weight:600;color:var(--verde);margin-bottom:0.3rem" id="importSummary"></div>
+          <div style="font-size:0.83rem;color:var(--gris)" id="importDetail"></div>
+        </div>
+        <div id="importErrors" style="display:none;background:rgba(220,53,69,0.07);border:1.5px solid rgba(220,53,69,0.2);border-radius:12px;padding:1rem;margin-bottom:1.25rem">
+          <div style="font-weight:600;color:#c0392b;margin-bottom:0.4rem">⚠️ Filas con errores (se omitirán)</div>
+          <div style="font-size:0.82rem;color:#666" id="importErrorList"></div>
+        </div>
+        <div style="margin-bottom:1.25rem">
+          <label style="display:block;font-weight:500;margin-bottom:0.6rem">¿Cómo quieres importar?</label>
+          <label style="display:flex;align-items:flex-start;gap:0.6rem;cursor:pointer;margin-bottom:0.6rem">
+            <input type="radio" name="importMode" value="add" checked style="margin-top:3px">
+            <div>
+              <div style="font-weight:500;font-size:0.9rem">Añadir al catálogo</div>
+              <div style="font-size:0.78rem;color:var(--gris)">Los nuevos productos se suman a los que ya tienes</div>
+            </div>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:0.6rem;cursor:pointer">
+            <input type="radio" name="importMode" value="replace" style="margin-top:3px">
+            <div>
+              <div style="font-weight:500;font-size:0.9rem">Reemplazar catálogo</div>
+              <div style="font-size:0.78rem;color:#c0392b">Se eliminarán todos los productos actuales</div>
+            </div>
+          </label>
+        </div>
+        <div class="form-actions" style="margin-top:0">
+          <button class="btn btn-ghost" onclick="closeModal('importModal')">Cancelar</button>
+          <button class="btn btn-primary" onclick="confirmImport()">✅ Confirmar importación</button>
+        </div>
+      </div>
+      <div id="importEmpty">
+        <div style="text-align:center;padding:2rem 1rem;color:var(--gris)">
+          <div style="font-size:3rem;margin-bottom:0.75rem">📊</div>
+          <div style="font-weight:500;color:var(--texto);margin-bottom:0.4rem">Selecciona un archivo Excel</div>
+          <div style="font-size:0.83rem;margin-bottom:1.5rem">Usa la plantilla descargable para asegurarte del formato correcto</div>
+          <button class="btn btn-primary" onclick="triggerExcelImport()">📂 Elegir archivo .xlsx</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let pendingImport = [];
+
+function triggerExcelImport() {
+  document.getElementById('importModal').classList.add('open');
+  document.getElementById('importPreview').style.display = 'none';
+  document.getElementById('importEmpty').style.display = 'block';
+  setTimeout(() => document.getElementById('excelFileInput').click(), 200);
+}
+
+function handleExcelFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      const wb = XLSX.read(ev.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      parseExcelRows(rows);
+    } catch(err) {
+      alert('Error al leer el archivo. Asegúrate de que es un Excel válido.');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  e.target.value = '';
+}
+
+function normalizeKey(k) {
+  return k.toLowerCase().replace(/[^a-záéíóúñ]/gi, '');
+}
+
+function findCol(row, ...candidates) {
+  const keys = Object.keys(row);
+  for (const c of candidates) {
+    const found = keys.find(k => normalizeKey(k).includes(normalizeKey(c)));
+    if (found !== undefined) return row[found];
+  }
+  return '';
+}
+
+function parseExcelRows(rows) {
+  pendingImport = [];
+  const errors = [];
+  const dataRows = rows.filter(r => {
+    const name = String(findCol(r, 'nombre', 'name', 'producto')).trim();
+    return name && !name.includes('*') && name.toLowerCase() !== 'nombre';
+  });
+  dataRows.forEach((row, i) => {
+    const name = String(findCol(row, 'nombre', 'name', 'producto')).trim();
+    if (!name) { errors.push(`Fila ${i+2}: sin nombre`); return; }
+    const pathRaw = String(findCol(row, 'patolog', 'indicac', 'patholog')).trim();
+    const pathologies = pathRaw ? pathRaw.split('|').map(p => p.trim()).filter(Boolean) : [];
+    const price = parseFloat(String(findCol(row, 'precio', 'price', 'pvp')).replace(',','.')) || 0;
+    const stock = parseInt(findCol(row, 'stock', 'unidades', 'cantidad')) || 0;
+    pendingImport.push({
+      id: Date.now() + i,
+      name,
+      brand: String(findCol(row, 'marca', 'laboratorio', 'brand', 'lab')).trim() || 'Sin marca',
+      price, stock,
+      emoji: String(findCol(row, 'emoji', 'icono', 'icon')).trim() || '🌿',
+      desc: String(findCol(row, 'descripci', 'desc')).trim(),
+      ingredients: String(findCol(row, 'principio', 'composici', 'ingredien')).trim(),
+      dosage: String(findCol(row, 'posolog', 'dosis', 'dosage')).trim(),
+      pathologies
+    });
+  });
+  document.getElementById('importEmpty').style.display = 'none';
+  document.getElementById('importPreview').style.display = 'block';
+  document.getElementById('importSummary').textContent =
+    `✅ ${pendingImport.length} producto${pendingImport.length!==1?'s':''} listos para importar`;
+  document.getElementById('importDetail').textContent = 'Archivo leído correctamente. Revisa las opciones y confirma.';
+  if (errors.length > 0) {
+    document.getElementById('importErrors').style.display = 'block';
+    document.getElementById('importErrorList').innerHTML = errors.map(e => `• ${e}`).join('<br>');
+  } else {
+    document.getElementById('importErrors').style.display = 'none';
+  }
+}
+
+function confirmImport() {
+  if (pendingImport.length === 0) { alert('No hay productos válidos para importar.'); return; }
+  const mode = document.querySelector('input[name="importMode"]:checked').value;
+  if (mode === 'replace') {
+    if (!confirm(`¿Seguro? Se eliminarán los ${products.length} productos actuales y se cargarán ${pendingImport.length} nuevos.`)) return;
+    products = pendingImport;
+  } else {
+    const maxId = products.reduce((m,p) => Math.max(m, p.id), 0);
+    pendingImport.forEach((p,i) => p.id = maxId + i + 1);
+    products = [...products, ...pendingImport];
+  }
+  save();
+  closeModal('importModal');
+  buildChips(); renderResults(); renderAll(); renderStats();
+  pendingImport = [];
+  alert(`✅ Productos importados correctamente.`);
 }
 </script>
 </body>
