@@ -431,55 +431,101 @@ function switchTab(name) {
 // EXCEL IMPORT
 function triggerExcelImport() { document.getElementById('importModal').classList.add('open'); }
 
+// 1. FUNCIÓN PARA LEER EL EXCEL (Blindada)
 function handleExcelFile(e) {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
+    
     reader.onload = function(ev) {
         try {
-            const wb = XLSX.read(ev.target.result, { type: 'array' });
-            const ws = wb.Sheets[wb.SheetNames[0]];
-            const rows = XLSX.utils.sheet_to_json(ws);
+            const data = new Uint8Array(ev.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            // Convertimos a JSON ignorando mayúsculas y espacios en las cabeceras
+            const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
+
+            console.log("Filas leídas del Excel:", rows); // Para depuración
 
             pendingImport = rows.map((r, i) => {
-                // Mapeo manual basado en tus columnas del Excel
-                const nombre = r.Nombre || r.nombre || r.producto;
+                // Función para buscar columnas sin importar tildes o mayúsculas
+                const findValue = (possibleNames) => {
+                    const match = Object.keys(r).find(k => {
+                        const cleanK = k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                        return possibleNames.includes(cleanK);
+                    });
+                    return match ? r[match] : null;
+                };
+
+                // Mapeamos tus columnas específicas
+                const name = findValue(['nombre', 'name', 'producto']);
                 
-                if (!nombre) return null; // Saltar filas vacías
+                // Si no hay nombre en esta fila, la ignoramos
+                if (!name || name.toString().trim() === "") return null;
 
                 return {
                     id: Date.now() + i,
-                    name: nombre,
-                    brand: r.Marca || r.marca || "Sin marca",
-                    price: parseFloat(String(r.Precio || 0).replace(',', '.')),
-                    stock: parseInt(r.Stock || 0),
-                    emoji: r.Emoji || r.emoji || "🌿",
-                    desc: r["descripción"] || r.Descripción || r.desc || "",
-                    ingredients: r["principios activos"] || r["Principios activos"] || "",
-                    dosage: r.posologia || r.Posologia || r.Posología || "",
-                    pathologies: r.patologias || r.Patologias || r.patologías ? 
-                                 String(r.patologias || r.Patologias || r.patologías).split('|').map(p => p.trim()).filter(Boolean) : []
+                    name: String(name).trim(),
+                    brand: String(findValue(['marca', 'brand', 'laboratorio']) || 'Sin marca'),
+                    price: parseFloat(String(findValue(['precio', 'price', 'pvp']) || 0).replace(',', '.')),
+                    stock: parseInt(findValue(['stock', 'unidades', 'cantidad']) || 0),
+                    emoji: String(findValue(['emoji', 'icono']) || '🌿'),
+                    desc: String(findValue(['descripcion', 'desc']) || ''),
+                    ingredients: String(findValue(['principios activos', 'ingredientes', 'composicion']) || ''),
+                    dosage: String(findValue(['posologia', 'dosis']) || ''),
+                    pathologies: findValue(['patologias', 'patologias', 'indicaciones']) ? 
+                                 String(findValue(['patologias', 'patologias', 'indicaciones'])).split('|').map(p => p.trim()).filter(Boolean) : []
                 };
             }).filter(p => p !== null);
 
-            document.getElementById('importEmpty').style.display = 'none';
-            document.getElementById('importPreview').style.display = 'block';
-            document.getElementById('importSummary').textContent = `✅ ${pendingImport.length} productos detectados`;
+            if (pendingImport.length > 0) {
+                document.getElementById('importEmpty').style.display = 'none';
+                document.getElementById('importPreview').style.display = 'block';
+                document.getElementById('importSummary').textContent = `✅ Detectados ${pendingImport.length} productos correctamente`;
+            } else {
+                alert("No se han podido extraer productos. Asegúrate de que la columna se llame 'Nombre'.");
+            }
         } catch (err) {
-            alert('Error al procesar el Excel. Revisa el formato.');
-            console.error(err);
+            console.error("Error crítico leyendo Excel:", err);
+            alert("Error al procesar el archivo Excel.");
         }
     };
     reader.readAsArrayBuffer(file);
 }
 
+// 2. FUNCIÓN PARA CONFIRMAR E INSERTAR (Segura)
 function confirmImport() {
+    if (!pendingImport || pendingImport.length === 0) {
+        alert("No hay datos para importar. Selecciona el archivo de nuevo.");
+        return;
+    }
+
     const mode = document.querySelector('input[name="importMode"]:checked').value;
-    products = mode === 'replace' ? pendingImport : [...products, ...pendingImport];
-    save();
-    closeModal('importModal');
+    
+    // Guardamos copia de seguridad por si falla la red
+    const backup = [...products];
+
+    if (mode === 'replace') {
+        products = [...pendingImport];
+    } else {
+        // Generar IDs únicos sumando al máximo actual
+        const startId = products.length > 0 ? Math.max(...products.map(p => p.id)) : 0;
+        const processed = pendingImport.map((p, idx) => ({ ...p, id: startId + idx + 1 }));
+        products = [...products, ...processed];
+    }
+
+    // Actualizamos visualmente DE INMEDIATO
     refreshUI();
-    alert("¡Importado!");
+    closeModal('importModal');
+
+    // Enviamos a la nube
+    save().then(() => {
+        alert(`✅ ¡Éxito! ${pendingImport.length} productos guardados en Google Sheets.`);
+        pendingImport = [];
+    }).catch(err => {
+        console.error("Fallo al subir a GSheet:", err);
+        alert("Se cargaron en la app, pero hubo un error al sincronizar con el Excel de Google. Revisa tu conexión.");
+    });
 }
 
 function renderStats() {
