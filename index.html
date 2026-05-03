@@ -294,7 +294,10 @@
             <div id="modalPaths" style="margin-bottom:1rem"></div>
             <div style="border-top:1px solid #eee; padding-top:1rem; display:flex; justify-content:space-between">
                 <div id="modalPrice" class="price" style="font-size:1.5rem"></div>
-                <button class="btn btn-primary" onclick="editFromView()">Editar</button>
+                <div>
+        <button class="btn btn-ghost" onclick="editFromView()">✏️ Editar</button>
+        <button class="btn btn-primary" onclick="closeModal('viewModal')">Cerrar</button>
+    </div>
             </div>
         </div>
     </div>
@@ -414,10 +417,31 @@ function renderCard(p) {
 function viewProduct(id) {
     const p = products.find(x => x.id === id);
     if (!p) return;
+    
+    currentViewId = id; // Guardamos el ID que estamos viendo para poder editarlo luego
+    
     document.getElementById('modalName').textContent = p.name;
-    document.getElementById('modalDesc').textContent = p.desc;
-    document.getElementById('modalPrice').textContent = parseFloat(p.price).toFixed(2) + ' €';
-    document.getElementById('modalPaths').innerHTML = p.pathologies.map(pt => `<span class="path-tag">${pt}</span>`).join('');
+    document.getElementById('modalDesc').textContent = p.desc || "Sin descripción";
+    document.getElementById('modalPrice').textContent = parseFloat(p.price || 0).toFixed(2) + ' €';
+    
+    // Mostramos las patologías como etiquetas
+    document.getElementById('modalPaths').innerHTML = (p.pathologies || []).map(pt => 
+        `<span class="path-tag">${pt}</span>`).join('');
+
+    // Añadimos información extra (Marca, Ingredientes, Posología) si existen
+    const extraInfo = `
+        <div style="margin-top:1rem; font-size:0.9rem; color:var(--gris)">
+            <p><strong>Laboratorio:</strong> ${p.brand || 'No especificado'}</p>
+            <p><strong>Ingredientes:</strong> ${p.ingredients || 'No especificados'}</p>
+            <p><strong>Posología:</strong> ${p.dosage || 'No especificada'}</p>
+        </div>
+    `;
+    
+    // Insertamos la info extra antes de los botones
+    const modalBody = document.querySelector('#viewModal .modal-body');
+    // Limpiamos contenido previo si fuera necesario o aseguramos que los campos se actualicen
+    document.getElementById('modalDesc').innerHTML = p.desc + extraInfo;
+
     document.getElementById('viewModal').classList.add('open');
 }
 
@@ -491,6 +515,36 @@ function handleExcelFile(e) {
         }
     };
     reader.readAsArrayBuffer(file);
+}
+//EDICION
+    function editFromView() {
+    closeModal('viewModal');
+    if (currentViewId) {
+        editProduct(currentViewId);
+    }
+}
+
+    function editProduct(id) {
+    const p = products.find(x => x.id === id);
+    if (!p) return;
+    
+    editingId = id;
+    editPathTags = [...(p.pathologies || [])]; // Cargamos las patologías actuales
+    
+    document.getElementById('editModalTitle').textContent = '✏️ Editar producto';
+    
+    // Rellenamos los campos del formulario
+    document.getElementById('fName').value = p.name || '';
+    document.getElementById('fBrand').value = p.brand || '';
+    document.getElementById('fPrice').value = p.price || 0;
+    document.getElementById('fStock').value = p.stock || 0;
+    document.getElementById('fEmoji').value = p.emoji || '🌿';
+    document.getElementById('fDesc').value = p.desc || '';
+    document.getElementById('fIngredients').value = p.ingredients || '';
+    document.getElementById('fDosage').value = p.dosage || '';
+    
+    renderPathTagsEdit(); // Función para mostrar las etiquetas en el editor
+    document.getElementById('editModal').classList.add('open');
 }
 
 // 2. FUNCIÓN PARA CONFIRMAR E INSERTAR (Segura)
