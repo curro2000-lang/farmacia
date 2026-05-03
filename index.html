@@ -433,24 +433,42 @@ function triggerExcelImport() { document.getElementById('importModal').classList
 
 function handleExcelFile(e) {
     const file = e.target.files[0];
+    if (!file) return;
     const reader = new FileReader();
     reader.onload = function(ev) {
-        const wb = XLSX.read(ev.target.result, { type: 'array' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws);
-        pendingImport = rows.map((r, i) => ({
-            id: Date.now() + i,
-            name: r.Nombre || r.name || 'Sin nombre',
-            brand: r.Marca || 'Genérico',
-            price: r.Precio || 0,
-            stock: r.Stock || 0,
-            emoji: r.Emoji || '🌿',
-            desc: r.Descripcion || '',
-            pathologies: r.Patologias ? r.Patologias.split('|') : []
-        }));
-        document.getElementById('importEmpty').style.display = 'none';
-        document.getElementById('importPreview').style.display = 'block';
-        document.getElementById('importSummary').textContent = `Listo: ${pendingImport.length} productos`;
+        try {
+            const wb = XLSX.read(ev.target.result, { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(ws);
+
+            pendingImport = rows.map((r, i) => {
+                // Mapeo manual basado en tus columnas del Excel
+                const nombre = r.Nombre || r.nombre || r.producto;
+                
+                if (!nombre) return null; // Saltar filas vacías
+
+                return {
+                    id: Date.now() + i,
+                    name: nombre,
+                    brand: r.Marca || r.marca || "Sin marca",
+                    price: parseFloat(String(r.Precio || 0).replace(',', '.')),
+                    stock: parseInt(r.Stock || 0),
+                    emoji: r.Emoji || r.emoji || "🌿",
+                    desc: r["descripción"] || r.Descripción || r.desc || "",
+                    ingredients: r["principios activos"] || r["Principios activos"] || "",
+                    dosage: r.posologia || r.Posologia || r.Posología || "",
+                    pathologies: r.patologias || r.Patologias || r.patologías ? 
+                                 String(r.patologias || r.Patologias || r.patologías).split('|').map(p => p.trim()).filter(Boolean) : []
+                };
+            }).filter(p => p !== null);
+
+            document.getElementById('importEmpty').style.display = 'none';
+            document.getElementById('importPreview').style.display = 'block';
+            document.getElementById('importSummary').textContent = `✅ ${pendingImport.length} productos detectados`;
+        } catch (err) {
+            alert('Error al procesar el Excel. Revisa el formato.');
+            console.error(err);
+        }
     };
     reader.readAsArrayBuffer(file);
 }
