@@ -927,7 +927,7 @@ const SAMPLE_PRODUCTS = [
 // ────────────────────────────────────────────
 // STATE
 // ────────────────────────────────────────────
-let products = JSON.parse(localStorage.getItem('farmaProducts') || 'null') || SAMPLE_PRODUCTS;
+let products = [];
 let activeChip = null;
 let currentViewId = null;
 let editingId = null;
@@ -938,15 +938,32 @@ const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyTCYLqoKQtaHZlZrAdM
 // Función para cargar datos al abrir la app
 async function loadFromSheet() {
   try {
+    // 1. Llamada a Google Sheets
     const response = await fetch(SCRIPT_URL);
     const data = await response.json();
+    
     if (data && data.length > 0) {
+      // 2. Si hay datos en la nube, reemplazamos TODO
       products = data;
-      buildChips(); renderResults(); renderAll(); renderStats();
+      console.log("Sincronización con GSheet exitosa");
+      
+      // 3. (Opcional) Actualizamos el cache local para la próxima vez
+      localStorage.setItem('farmaProducts', JSON.stringify(products));
+    } else {
+      console.log("El GSheet parece estar vacío.");
+      products = SAMPLE_PRODUCTS;
     }
   } catch (e) {
-    console.error("Error cargando datos:", e);
+    console.error("Error conectando con GSheet:", e);
+    // Si falla internet, usamos lo que haya en local
+    products = JSON.parse(localStorage.getItem('farmaProducts')) || SAMPLE_PRODUCTS;
   }
+  
+  // 4. RE-RENDERIZAR la interfaz con los datos nuevos
+  buildChips(); 
+  renderResults(); 
+  renderAll(); 
+  renderStats();
 }
 
 // Función para guardar datos (reemplaza tu función save actual)
