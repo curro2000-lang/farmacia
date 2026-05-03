@@ -1436,6 +1436,9 @@ function confirmImport() {
   pendingImport = [];
   alert(`✅ Productos importados correctamente.`);
 }
+   window.onload = () => {
+  loadFromSheet(); // <--- Esta línea es vital
+};
 </script>
 </body>
 </html>
